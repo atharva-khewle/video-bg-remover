@@ -23,6 +23,7 @@ function loadVision() {
 }
 
 const segmenters = {};
+export const isEngineReady = (id) => id === 'chroma' || !!segmenters[id];
 export async function ensureEngine(id) {
   if (id === 'chroma' || segmenters[id]) return;
   const { mod, fileset } = await loadVision();
@@ -111,4 +112,36 @@ export function segmentChroma(video, p, out) {
     d[i] = t * t * (3 - 2 * t);
   }
   return res;
+}
+
+// ---------- object detection (boxes + labels) ----------
+// COCO label -> DeepLab class index, so a kept object can be cut out precisely instead of boxed.
+export const LABEL_TO_DEEPLAB = {
+  airplane: 1, bicycle: 2, bird: 3, boat: 4, bottle: 5, bus: 6, car: 7, cat: 8, chair: 9, cow: 10,
+  'dining table': 11, dog: 12, horse: 13, motorcycle: 14, person: 15, 'potted plant': 16, sheep: 17,
+  couch: 18, train: 19, tv: 20,
+};
+
+let detector;
+export async function ensureDetector() {
+  if (detector) return;
+  const { mod, fileset } = await loadVision();
+  const make = (delegate) => mod.ObjectDetector.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: new URL('models/efficientdet_lite2.tflite', ROOT).href, delegate },
+    runningMode: 'VIDEO',
+    scoreThreshold: 0.35,
+    maxResults: 25,
+  });
+  try { detector = await make('GPU'); } catch { detector = await make('CPU'); }
+}
+
+// Returns [{label, score, box:{x,y,w,h}}] with coordinates normalised to 0..1.
+export function detectObjects(video) {
+  const r = detector.detectForVideo(video, nextTs());
+  const W = video.videoWidth, H = video.videoHeight;
+  return r.detections.map((d) => ({
+    label: d.categories[0].categoryName,
+    score: d.categories[0].score,
+    box: { x: d.boundingBox.originX / W, y: d.boundingBox.originY / H, w: d.boundingBox.width / W, h: d.boundingBox.height / H },
+  }));
 }

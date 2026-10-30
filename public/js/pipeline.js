@@ -50,10 +50,38 @@ export class Pipeline {
     const c = 0.5 - p.edgeShift, half = Math.max(0.005, p.softness / 2);
     const lo = c - half, span = half * 2;
     const k = p.strength;
+    // p.region: boxes (0..1) of the objects the user chose to keep; the subject only counts inside them
+    let reg = null;
+    if (p.region) {
+      reg = new Uint8Array(w * h);
+      for (const b of p.region) {
+        const px = b.w * 0.06, py = b.h * 0.04;
+        const x0 = Math.max(0, Math.floor((b.x - px) * w)), x1 = Math.min(w, Math.ceil((b.x + b.w + px) * w));
+        const y0 = Math.max(0, Math.floor((b.y - py) * h)), y1 = Math.min(h, Math.ceil((b.y + b.h + py) * h));
+        const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            // inside a removed object's box too? give the pixel to whichever centre it is closer to (box-relative)
+            let mine = true;
+            if (p.exclude) {
+              const dm = (((x + 0.5) / w - cx) / b.w) ** 2 + (((y + 0.5) / h - cy) / b.h) ** 2;
+              for (const e of p.exclude) {
+                const ex = (x + 0.5) / w, ey = (y + 0.5) / h;
+                if (ex < e.x || ex > e.x + e.w || ey < e.y || ey > e.y + e.h) continue;
+                const de = ((ex - (e.x + e.w / 2)) / e.w) ** 2 + ((ey - (e.y + e.h / 2)) / e.h) ** 2;
+                if (de < dm) { mine = false; break; }
+              }
+            }
+            if (mine) reg[y * w + x] = 1;
+          }
+        }
+      }
+    }
     for (let i = 0, j = 0; i < m.length; i++, j += 4) {
       let t = (m[i] - lo) / span;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       let v = t * t * (3 - 2 * t);
+      if (reg && !reg[i]) v = 0;
       if (p.invert) v = 1 - v;
       px[j] = px[j + 1] = px[j + 2] = 255;
       px[j + 3] = (1 - k * (1 - v)) * 255;

@@ -1,5 +1,6 @@
 import { Pipeline } from './pipeline.js';
-import { ensureEngine, DEEPLAB_CLASSES } from './engines.js';
+import { ensureEngine, isEngineReady, DEEPLAB_CLASSES, ensureDetector, detectObjects, LABEL_TO_DEEPLAB } from './engines.js';
+import { Tracker } from './tracker.js';
 import { transcode } from './convert.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -100,7 +101,7 @@ $('#classes').append(...DEEPLAB_CLASSES.slice(1).map((name, i) => {
   return l;
 }));
 $$('[data-bg]').forEach((b) => (b.onclick = () => setKey('bgColor', b.dataset.bg)));
-$('#reset').onclick = () => { state = { ...DEFAULTS }; syncUI(); save(); loadEngine().then(() => requestRender(true)); };
+$('#reset').onclick = () => { for (const x of tracker.tracks) x.keep = true; tracker.keepNew = true; whoSig = ''; state = { ...DEFAULTS }; syncUI(); save(); loadEngine().then(() => requestRender(true)); };
 $('#bgFile').onchange = (e) => {
   const f = e.target.files[0]; if (!f) return;
   const img = new Image();
@@ -136,7 +137,7 @@ fileInput.onchange = () => fileInput.files[0] && openFile(fileInput.files[0]);
 ['dragleave', 'drop'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 document.addEventListener('drop', (e) => e.dataTransfer.files[0] && openFile(e.dataTransfer.files[0]));
 document.addEventListener('paste', (e) => { const f = e.clipboardData?.files?.[0]; if (f) openFile(f); });
-$('#newFile').onclick = () => { $('#fab').hidden = true; $('#panel').classList.add('hidden'); $('.layout').classList.add('empty'); video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
+$('#newFile').onclick = () => { tracker.reset(); whoSig = ''; $('#who').classList.add('hidden'); $('#fab').hidden = true; $('#panel').classList.add('hidden'); $('.layout').classList.add('empty'); video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
 
 function waitVideo(url) {
   return new Promise((resolve, reject) => {
@@ -152,6 +153,7 @@ function waitVideo(url) {
 async function openFile(file) {
   fileName = file.name.replace(/\.[^.]+$/, '');
   drop.classList.add('hidden');
+  tracker.reset(); whoSig = ''; $('#who').classList.add('hidden');
   $('#fab').hidden = false;
   $('#panel').classList.remove('hidden');
   $('.layout').classList.remove('empty');
@@ -174,6 +176,7 @@ async function openFile(file) {
   await loadEngine();
   video.currentTime = 0;
   requestRender(true);
+  ensureDetector().then(() => { detectorReady = true; requestRender(true); }).catch((e) => console.warn('detector unavailable', e));
 }
 
 function applySize() {
@@ -184,11 +187,121 @@ function applySize() {
 
 // ---------- rendering ----------
 let rafQueued = false;
+
+// ---------- who / what to keep ----------
+const tracker = new Tracker();
+const ov = $('#ov');
+let detectorReady = false, lastDetAt = 0, lastDetTime = -1, whoSig = '', showBoxes = true;
+const usesRegion = () => tracker.tracks.some((t) => !t.keep);
+
+// Which engine the kept objects need: people use the chosen person engine, other objects need DeepLab.
+function wantedEngine(base) {
+  const kept = tracker.tracks.filter((t) => t.keep);
+  return usesRegion() && base.engine !== 'chroma' && kept.some((t) => t.label !== 'person') ? 'deeplab' : base.engine;
+}
+// UI settings plus the object filter, as the pipeline should see them right now.
+function effState(base) {
+  if (!usesRegion()) return base;
+  const kept = tracker.tracks.filter((t) => t.keep);
+  const near = (t) => Math.abs(video.currentTime - t.seen) < 1.5;
+  const s = {
+    ...base,
+    region: kept.filter(near).map((t) => t.box),
+    exclude: tracker.tracks.filter((t) => !t.keep && near(t)).map((t) => t.box), // where boxes overlap, the nearer centre wins
+  };
+  if (wantedEngine(base) === 'deeplab' && base.engine !== 'deeplab' && isEngineReady('deeplab')) {
+    s.engine = 'deeplab';
+    s.classes = [...new Set(kept.map((t) => LABEL_TO_DEEPLAB[t.label]))];
+  }
+  return s;
+}
+async function applySelection() {
+  await ensureEngine(wantedEngine(state));
+  pipe.reset(); refreshWho(); requestRender(true);
+}
+function detectStep(force) {
+  if (!detectorReady) return;
+  const now = performance.now();
+  if (!force && (now - lastDetAt < 70 || (video.paused && video.currentTime === lastDetTime))) return;
+  lastDetAt = now; lastDetTime = video.currentTime;
+  try {
+    tracker.update(detectObjects(video).filter((d) => d.label in LABEL_TO_DEEPLAB), video.currentTime);
+    refreshWho();
+  } catch (e) { console.warn('detect', e); }
+}
+function refreshWho() {
+  const t = video.currentTime;
+  const list = tracker.tracks;
+  const sig = JSON.stringify(list.map((x) => [x.id, x.keep, Math.abs(t - x.seen) < 0.4]));
+  if (sig === whoSig) return;
+  whoSig = sig;
+  $('#who').classList.toggle('hidden', !list.length);
+  $('#whoChips').replaceChildren(...list.map((x) => {
+    const b = document.createElement('button');
+    b.className = 'who-chip ' + (x.keep ? 'is-keep' : 'is-removed') + (Math.abs(t - x.seen) < 0.4 ? '' : ' away');
+    b.textContent = (x.keep ? '✓ ' : '✕ ') + x.name;
+    b.title = x.keep ? 'Kept. Tap to remove' : 'Removed. Tap to keep';
+    b.onclick = () => toggleTrack(x);
+    return b;
+  }));
+  const people = list.filter((x) => x.label === 'person').length;
+  const others = list.length - people;
+  const parts = [];
+  if (people) parts.push(people + (people === 1 ? ' person' : ' people'));
+  if (others) parts.push(others + (others === 1 ? ' other object' : ' other objects'));
+  $('#whoHint').textContent = `Found ${parts.join(' and ')}. Tap one to keep or remove it.`;
+}
+function toggleTrack(x) { x.keep = !x.keep; whoSig = ''; applySelection(); }
+$('#midBtn').onclick = () => {
+  const mid = tracker.middle(video.currentTime);
+  if (!mid) { $('#whoHint').textContent = 'No person visible in this frame. Move the video to a frame with people.'; return; }
+  for (const x of tracker.tracks) if (x.label === 'person') x.keep = x === mid;
+  tracker.keepNew = false; // people who walk in later are removed too
+  whoSig = ''; applySelection();
+};
+$('#allBtn').onclick = () => { for (const x of tracker.tracks) x.keep = true; tracker.keepNew = true; whoSig = ''; applySelection(); };
+$('#showBoxes').onchange = (e) => { showBoxes = e.target.checked; requestRender(); };
+
+function drawOverlay() {
+  const W = pipe.W, H = pipe.H;
+  if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
+  const c = ov.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  if (!showBoxes || exporting || view === 'mask') return;
+  const lw = Math.max(2, W / 320);
+  c.font = `600 ${Math.round(lw * 5.5)}px system-ui, sans-serif`;
+  c.textBaseline = 'top';
+  for (const t of tracker.visible(video.currentTime)) {
+    const x = t.box.x * W, y = t.box.y * H, w = t.box.w * W, h = t.box.h * H;
+    const color = t.keep ? '#16a34a' : '#dc2626';
+    c.lineWidth = lw; c.strokeStyle = color; c.setLineDash(t.keep ? [] : [lw * 3, lw * 2]);
+    c.strokeRect(x, y, w, h);
+    c.setLineDash([]);
+    const label = (t.keep ? '✓ ' : '✕ ') + t.name;
+    const tw = c.measureText(label).width + lw * 4, th = lw * 8;
+    const ly = y - th < 0 ? y : y - th;
+    c.fillStyle = color; c.fillRect(x - lw / 2, ly, tw, th);
+    c.fillStyle = '#fff'; c.fillText(label, x + lw, ly + lw * 1.2);
+  }
+}
+canvas.addEventListener('click', (e) => {
+  if (picking || !showBoxes || exporting) return;
+  const r = canvas.getBoundingClientRect();
+  const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+  const hit = tracker.visible(video.currentTime)
+    .filter((t) => px >= t.box.x && px <= t.box.x + t.box.w && py >= t.box.y && py <= t.box.y + t.box.h)
+    .sort((a, b) => a.box.w * a.box.h - b.box.w * b.box.h)[0];
+  if (hit) toggleTrack(hit);
+});
+
 let exportState = null; // settings used while exporting (may differ from the UI, e.g. MP4 background fill)
 function renderNow(force = false) {
   if (!video.videoWidth || !pipe.W) return;
-  try { pipe.render(video, exporting && exportState ? exportState : state, exporting ? (state.outMode === 'mask' ? 'mask' : 'result') : view, force); }
-  catch (e) { console.error(e); }
+  try {
+    if (showBoxes || usesRegion()) detectStep(force);
+    pipe.render(video, effState(exporting && exportState ? exportState : state), exporting ? (state.outMode === 'mask' ? 'mask' : 'result') : view, force);
+    drawOverlay();
+  } catch (e) { console.error(e); }
 }
 function requestRender(force = false) {
   if (exporting || !video.paused || rafQueued) return;
