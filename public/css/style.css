@@ -125,3 +125,4 @@ input[type=color]{width:42px;height:34px;border:1px solid var(--line);background
   input[type=range]{height:34px}
 }
 .dot{min-height:0!important}
+.reset{width:100%;margin-bottom:4px;font-size:13px}

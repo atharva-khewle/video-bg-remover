@@ -199,17 +199,40 @@ function requestRender(force = false) {
   rafQueued = true;
   requestAnimationFrame(async () => { rafQueued = false; await engineReady; renderNow(force); });
 }
+// rAF, not requestVideoFrameCallback: rVFC barely fires for an offscreen element, which starved the export of frames.
+let lastDrawn = -1;
+// The recorded picture trails the sound by the time spent processing a frame (+ waiting for the next paint). Delay the audio by that.
+const RECORDER_LAG = 0.02;
+let renderEma = 0.05, gapEma = 0.04, lastRenderAt = 0;
+function trackLatency(t0) {
+  const now = performance.now();
+  renderEma = renderEma * 0.9 + ((now - t0) / 1000) * 0.1;
+  if (lastRenderAt) gapEma = gapEma * 0.9 + ((now - lastRenderAt) / 1000) * 0.1;
+  lastRenderAt = now;
+  if (audioGraph?.delay) audioGraph.delay.delayTime.setTargetAtTime(Math.min(0.6, RECORDER_LAG + renderEma + gapEma / 2), audioGraph.ac.currentTime, 0.3);
+}
 function tick() {
-  renderNow();
-  updateTime();
+  if (video.currentTime !== lastDrawn) {
+    lastDrawn = video.currentTime;
+    const t0 = performance.now();
+    renderNow();
+    if (exporting) trackLatency(t0);
+    updateTime();
+  }
   if (!video.paused && !video.ended) schedule();
 }
-const schedule = () => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick));
+// timer fallback keeps frames flowing when the browser throttles rAF (partly covered window)
+const schedule = () => {
+  let fired = false;
+  const go = () => { if (!fired) { fired = true; tick(); } };
+  requestAnimationFrame(go);
+  setTimeout(go, 24);
+};
 
 video.addEventListener('play', async () => { $('#play').textContent = '❚❚'; await engineReady; schedule(); });
 video.addEventListener('pause', () => { $('#play').textContent = '▶'; requestRender(); });
 video.addEventListener('ended', () => { $('#play').textContent = '▶'; });
-video.addEventListener('seeked', () => { pipe.reset(); updateTime(); requestRender(true); });
+video.addEventListener('seeked', () => { lastDrawn = -1; pipe.reset(); updateTime(); requestRender(true); });
 $('#play').onclick = () => (video.paused ? video.play() : video.pause());
 document.addEventListener('keydown', (e) => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -254,18 +277,31 @@ if (!FORMATS.some(([m]) => m === state.format)) state.format = FORMATS[0]?.[0] |
 
 let audioGraph;
 // A suspended AudioContext would stall the element once it is routed through it, so bail out unless it runs.
+// The element stays routed to the speakers except while exporting; each export gets a fresh delay + capture node.
 async function getAudioStream() {
   if (!audioGraph) {
     const ac = new AudioContext();
     await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 500))]);
     if (ac.state !== 'running') { ac.close(); throw new Error('audio context blocked'); }
-    const src = ac.createMediaElementSource(video);
-    const dest = ac.createMediaStreamDestination();
-    src.connect(dest);
-    audioGraph = { ac, src, dest };
+    audioGraph = { ac, src: ac.createMediaElementSource(video) };
+    audioGraph.src.connect(ac.destination);
   }
-  await Promise.race([audioGraph.ac.resume(), new Promise((r) => setTimeout(r, 500))]);
-  return audioGraph.dest.stream;
+  const g = audioGraph;
+  await Promise.race([g.ac.resume(), new Promise((r) => setTimeout(r, 500))]);
+  g.src.disconnect();
+  g.dest = g.ac.createMediaStreamDestination();
+  g.delay = g.ac.createDelay(1);
+  g.delay.delayTime.value = RECORDER_LAG + renderEma + gapEma / 2;
+  g.src.connect(g.delay).connect(g.dest);
+  return g.dest.stream;
+}
+function releaseAudio() {
+  const g = audioGraph;
+  if (!g || !g.dest) return;
+  g.src.disconnect();
+  g.delay.disconnect();
+  g.dest = g.delay = null;
+  g.src.connect(g.ac.destination);
 }
 
 let cancelExport = null;
@@ -294,6 +330,7 @@ $('#download').onclick = async () => {
     if (finished) return; finished = true;
     exporting = false; cancelExport = null; btn.textContent = 'Download video'; $('#fab').textContent = 'Download video';
     busy(false);
+    releaseAudio();
     rec.state !== 'inactive' && rec.stop();
   };
   rec.onstop = () => {
@@ -305,12 +342,15 @@ $('#download').onclick = async () => {
     busy(true, `Processing ${mmss(video.currentTime)} / ${mmss(video.duration)} — keep this tab open`, video.currentTime / video.duration);
   }, 250);
   video.onended = () => { setTimeout(() => { clearInterval(guard); finish(); }, 200); };
-  rec.start(500);
+  lastRenderAt = 0;
   video.muted = false;
   try { await video.play(); } catch {
     video.muted = true; // autoplay policy: record silently rather than fail
     await video.play();
   }
+  // Start recording only once playback runs, so the file has no leading static/silent gap.
+  rec.start(500);
+  renderNow(true); // paint immediately so the video track gets a frame at t=0, same as the audio
 };
 
 function showResult(blob, ext) {
