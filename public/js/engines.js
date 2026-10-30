@@ -129,7 +129,7 @@ export async function ensureDetector() {
   const make = (delegate) => mod.ObjectDetector.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: new URL('models/efficientdet_lite2.tflite', ROOT).href, delegate },
     runningMode: 'VIDEO',
-    scoreThreshold: 0.35,
+    scoreThreshold: 0.25, // low on purpose: the tracker uses weak detections to keep following someone, but only strong ones start a new track
     maxResults: 25,
   });
   try { detector = await make('GPU'); } catch { detector = await make('CPU'); }

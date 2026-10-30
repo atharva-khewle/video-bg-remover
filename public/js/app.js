@@ -225,13 +225,14 @@ function detectStep(force) {
   if (!force && (now - lastDetAt < 70 || (video.paused && video.currentTime === lastDetTime))) return;
   lastDetAt = now; lastDetTime = video.currentTime;
   try {
-    tracker.update(detectObjects(video).filter((d) => d.label in LABEL_TO_DEEPLAB), video.currentTime);
+    tracker.update(detectObjects(video).filter((d) => d.label in LABEL_TO_DEEPLAB), video.currentTime, video, video.paused);
     refreshWho();
   } catch (e) { console.warn('detect', e); }
 }
 function refreshWho() {
   const t = video.currentTime;
-  const list = tracker.tracks;
+  // list what is on screen now (plus anything the user already made a decision about)
+  const list = tracker.tracks.filter((x) => x.decided || Math.abs(t - x.seen) < 1.5);
   const sig = JSON.stringify(list.map((x) => [x.id, x.keep, Math.abs(t - x.seen) < 0.4]));
   if (sig === whoSig) return;
   whoSig = sig;
@@ -251,11 +252,11 @@ function refreshWho() {
   if (others) parts.push(others + (others === 1 ? ' other object' : ' other objects'));
   $('#whoHint').textContent = `Found ${parts.join(' and ')}. Tap one to keep or remove it.`;
 }
-function toggleTrack(x) { x.keep = !x.keep; whoSig = ''; applySelection(); }
+function toggleTrack(x) { x.keep = !x.keep; x.decided = true; whoSig = ''; applySelection(); }
 $('#midBtn').onclick = () => {
   const mid = tracker.middle(video.currentTime);
   if (!mid) { $('#whoHint').textContent = 'No person visible in this frame. Move the video to a frame with people.'; return; }
-  for (const x of tracker.tracks) if (x.label === 'person') x.keep = x === mid;
+  for (const x of tracker.tracks) if (x.label === 'person') { x.keep = x === mid; if (Math.abs(video.currentTime - x.seen) < 1.5) x.decided = true; }
   tracker.keepNew = false; // people who walk in later are removed too
   whoSig = ''; applySelection();
 };
