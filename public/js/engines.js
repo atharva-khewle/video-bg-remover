@@ -61,10 +61,10 @@ export function segmentML(id, video, classes, out) {
     result = ensureOut(out, w, h);
     const d = result.data;
     if (id === 'selfie') {
-      // single mask: confidence of "background" is the model output, invert to get subject
+      // verified on real footage: the single output mask is the person confidence
       const a = masks[0].getAsFloat32Array();
       const sub = masks.length > 1 ? masks[1].getAsFloat32Array() : null;
-      if (sub) d.set(sub); else for (let i = 0; i < d.length; i++) d[i] = 1 - a[i];
+      if (sub) d.set(sub); else d.set(a);
     } else if (id === 'multiclass') {
       const bg = masks[0].getAsFloat32Array();
       for (let i = 0; i < d.length; i++) d[i] = 1 - bg[i];

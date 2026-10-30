@@ -4,17 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#f6f5f1">
 <title>Cutout – Video Background Remover</title>
-<meta name="description" content="Remove video backgrounds in your browser. Any format, no upload, no signup. Adjustable strength, edge control, chroma key, transparent WebM export.">
+<meta name="description" content="Remove video backgrounds in your browser. Any format, no upload, no signup.">
 <link rel="stylesheet" href="../css/style.css">
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="../"><span class="logo"></span> Cutout <small>video background remover</small></a>
-  <div class="top-r">
-    <span class="badge">100% in your browser · nothing is uploaded</span>
-    <a href="https://github.com/atharva-khewle/video-bg-remover" target="_blank" rel="noopener">GitHub</a>
-  </div>
+  <a class="brand" href="../"><span class="logo"></span>Cutout</a>
+  <span class="privacy">Your video never leaves this device</span>
 </header>
 
 <main class="layout">
@@ -22,117 +20,128 @@
     <div id="drop" class="drop">
       <input id="file" type="file" accept="video/*,image/gif,.mkv,.avi,.flv,.wmv,.ts,.3gp,.mpg,.mpeg,.m2ts,.mts,.vob,.ogv,.mov,.m4v,.webm,.mp4">
       <div class="drop-in">
-        <div class="big">Drop a video here</div>
-        <div class="muted">or click to choose · MP4, MOV, WebM, MKV, AVI, FLV, WMV, GIF… any format</div>      </div>
+        <div class="big">Choose a video</div>
+        <div class="muted">or drop it here. Works with MP4, MOV, WebM, MKV, AVI and more.</div>
+        <span class="pick">Select video</span>
+      </div>
     </div>
 
     <div id="player" class="player hidden">
       <div class="canvas-wrap" id="canvasWrap"><canvas id="out"></canvas><div id="busy" class="busy hidden"><div class="spin"></div><div id="busyText"></div><div class="bar"><i id="busyBar"></i></div></div></div>
       <div class="transport">
-        <button id="play" title="Space">▶</button>
-        <input id="seek" type="range" min="0" max="1000" value="0">
+        <button id="play" class="icon" title="Play / pause (Space)" aria-label="Play">▶</button>
+        <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
         <span id="time" class="muted">0:00 / 0:00</span>
-        <button id="snap" title="Save current frame as PNG">PNG frame</button>
-        <button id="newFile" class="ghost">New video</button>
       </div>
-      <div class="views seg" id="views">
-        <button data-view="result" class="on">Result</button>
-        <button data-view="original">Original</button>
-        <button data-view="mask">Matte</button>
-        <button data-view="split">Split</button>
-        <label class="inline"><input type="checkbox" data-k="checker" checked> checkerboard</label>
+      <div class="under">
+        <div class="views" id="views" role="group" aria-label="Preview">
+          <button data-view="result" class="on">Result</button>
+          <button data-view="original">Original</button>
+          <button data-view="split">Compare</button>
+          <button data-view="mask">Mask</button>
+        </div>
+        <div class="links"><button id="snap" class="link">Save this frame</button><button id="newFile" class="link">Use another video</button></div>
       </div>
     </div>
 
     <div id="exportCard" class="card hidden"></div>
   </section>
 
-  <aside class="panel">
-    <details open>
-      <summary>Presets</summary>
-      <div class="chips" id="presets"></div>
-    </details>
+  <aside class="panel" id="panel">
+    <h2>Choose a look</h2>
+    <div class="looks">
+      <button data-preset="transparent" class="look"><i class="sw sw-checker"></i><b>Transparent</b><small>Just the person</small></button>
+      <button data-preset="blur" class="look"><i class="sw sw-blur"></i><b>Blurred</b><small>Soft background</small></button>
+      <button data-preset="white" class="look"><i class="sw sw-white"></i><b>White</b><small>Clean studio</small></button>
+      <button data-preset="green" class="look"><i class="sw sw-green"></i><b>Green screen</b><small>For editing</small></button>
+      <button data-preset="sticker" class="look"><i class="sw sw-sticker"></i><b>Sticker</b><small>White outline</small></button>
+    </div>
 
-    <details open>
-      <summary>Remove background</summary>
-      <label>Engine
-        <select data-k="engine">
-          <option value="selfie">Person – fast</option>
-          <option value="multiclass">Person – detailed (hair, clothes)</option>
-          <option value="deeplab">Objects / animals / vehicles</option>
-          <option value="chroma">Chroma key (green/blue screen)</option>
-        </select>
-      </label>
-      <div id="deeplabBox" class="hidden"><div class="muted">Keep these classes</div><div class="chips" id="classes"></div></div>
-      <div id="chromaBox" class="hidden">
-        <label>Key color <input type="color" data-k="keyColor"> <button id="pick" class="ghost sm" type="button">Pick from video</button></label>
-        <label>Similarity <output></output><input type="range" data-k="keySim" min="0" max="0.8" step="0.01"></label>
-        <label>Smoothness <output></output><input type="range" data-k="keySmooth" min="0" max="0.6" step="0.01"></label>
-      </div>
-      <label>Strength <output></output>
-        <input type="range" data-k="strength" min="0" max="1" step="0.01">
-        <span class="hint">100% = background fully gone. Lower keeps that much of the background visible.</span>
-      </label>
-    </details>
+    <button id="download" class="primary">Download video</button>
+    <p class="hint center" id="dlHint">Takes about as long as the video. Keep this tab open.</p>
 
-    <details>
-      <summary>Edge &amp; quality</summary>
-      <label>Edge shift <output></output><input type="range" data-k="edgeShift" min="-0.4" max="0.4" step="0.01"><span class="hint">+ grows subject, − shrinks it</span></label>
-      <label>Edge softness <output></output><input type="range" data-k="softness" min="0.02" max="1" step="0.01"></label>
-      <label>Feather <output></output><input type="range" data-k="feather" min="0" max="20" step="0.5"></label>
-      <label>Temporal smoothing <output></output><input type="range" data-k="temporal" min="0" max="0.9" step="0.05"><span class="hint">Reduces flicker between frames</span></label>
-      <label class="inline"><input type="checkbox" data-k="invert"> Invert (remove subject, keep background)</label>
-    </details>
+    <button id="advToggle" class="adv-toggle" aria-expanded="false">Advanced settings <span>▾</span></button>
 
-    <details>
-      <summary>New background</summary>
-      <label>Type
-        <select data-k="bgType">
-          <option value="transparent">Transparent</option>
-          <option value="color">Solid color</option>
-          <option value="gradient">Gradient</option>
-          <option value="blur">Blurred original</option>
-          <option value="image">Image</option>
-        </select>
-      </label>
-      <div class="row">
-        <label class="inline">Color <input type="color" data-k="bgColor"></label>
-        <label class="inline">Color 2 <input type="color" data-k="bgColor2"></label>
-        <button class="ghost sm" data-bg="#00ff00">Green</button>
-        <button class="ghost sm" data-bg="#0000ff">Blue</button>
-        <button class="ghost sm" data-bg="#ffffff">White</button>
-        <button class="ghost sm" data-bg="#000000">Black</button>
-      </div>
-      <label>Blur amount <output></output><input type="range" data-k="bgBlur" min="2" max="60" step="1"></label>
-      <label>Dim <output></output><input type="range" data-k="bgDim" min="0.2" max="1.2" step="0.05"></label>
-      <label>Background image <input type="file" id="bgFile" accept="image/*"></label>
-    </details>
+    <div id="adv" class="adv hidden">
+      <section>
+        <h3>What to cut out</h3>
+        <div class="chips2">
+          <button data-set="engine" data-val="selfie">People</button>
+          <button data-set="engine" data-val="multiclass">People (fine hair)</button>
+          <button data-set="engine" data-val="deeplab">Pets &amp; objects</button>
+          <button data-set="engine" data-val="chroma">Green / blue screen</button>
+        </div>
+        <div data-show="engine:deeplab"><p class="hint">Tap what to keep</p><div class="chips" id="classes"></div></div>
+        <div data-show="engine:chroma" class="stack">
+          <p class="hint">Which color is your screen?</p>
+          <div class="row"><input type="color" data-k="keyColor" aria-label="Screen color"><button id="pick" class="ghost sm" type="button">Pick from the video</button></div>
+          <label>Color range <output></output><input type="range" data-k="keySim" min="0" max="0.8" step="0.01"></label>
+          <label>Edge blend <output></output><input type="range" data-k="keySmooth" min="0" max="0.6" step="0.01"></label>
+        </div>
+        <label class="check"><input type="checkbox" data-k="invert"> Remove the person instead, keep the background</label>
+      </section>
 
-    <details>
-      <summary>Effects</summary>
-      <label>Outline <output></output><input type="range" data-k="outline" min="0" max="12" step="1"></label>
-      <label class="inline">Outline color <input type="color" data-k="outlineColor"></label>
-      <label>Drop shadow <output></output><input type="range" data-k="shadow" min="0" max="40" step="1"></label>
-    </details>
+      <section>
+        <h3>Cutout quality</h3>
+        <label>How much background to remove <output></output>
+          <input type="range" data-k="strength" min="0" max="1" step="0.01">
+          <span class="ends"><i>A little</i><i>All of it</i></span>
+        </label>
+        <label>Cutout size <output></output>
+          <input type="range" data-k="edgeShift" min="-0.4" max="0.4" step="0.01">
+          <span class="ends"><i>Tighter</i><i>Wider</i></span>
+        </label>
+        <label>Soften edges <output></output><input type="range" data-k="feather" min="0" max="20" step="0.5"></label>
+        <label>Reduce flicker <output></output><input type="range" data-k="temporal" min="0" max="0.9" step="0.05"></label>
+      </section>
 
-    <details open>
-      <summary>Export</summary>
-      <label>Output
-        <select data-k="outMode"><option value="result">Cutout video</option><option value="mask">Matte (black/white mask)</option></select>
-      </label>
-      <label>Format <select id="fmt" data-k="format"></select></label>
-      <label>Resolution <select data-k="scale"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></select></label>
-      <label>Frame rate <select data-k="fps"><option value="24">24</option><option value="30">30</option><option value="60">60</option></select></label>
-      <label>Quality <select data-k="bitrate"><option value="3">Low (3 Mbps)</option><option value="8">Medium (8 Mbps)</option><option value="16">High (16 Mbps)</option><option value="30">Max (30 Mbps)</option></select></label>
-      <label class="inline"><input type="checkbox" data-k="audio"> Include audio</label>
-      <button id="exportBtn" class="primary">Remove background &amp; export</button>
-      <div class="hint">Processing runs in real time and needs this tab visible. Transparent output needs WebM (Chrome/Edge/Firefox-recording).</div>
-      <button id="reset" class="ghost sm">Reset all settings</button>
-    </details>
+      <section>
+        <h3>Background</h3>
+        <div class="chips2">
+          <button data-set="bgType" data-val="transparent">None</button>
+          <button data-set="bgType" data-val="color">Color</button>
+          <button data-set="bgType" data-val="gradient">Gradient</button>
+          <button data-set="bgType" data-val="blur">Blur</button>
+          <button data-set="bgType" data-val="image">Picture</button>
+        </div>
+        <div data-show="bgType:color|gradient" class="row swatches">
+          <input type="color" data-k="bgColor" aria-label="Background color">
+          <input type="color" data-k="bgColor2" aria-label="Second color" data-show="bgType:gradient">
+          <button class="dot" data-bg="#ffffff" style="background:#fff" aria-label="White"></button>
+          <button class="dot" data-bg="#000000" style="background:#000" aria-label="Black"></button>
+          <button class="dot" data-bg="#00b140" style="background:#00b140" aria-label="Green"></button>
+          <button class="dot" data-bg="#1f6feb" style="background:#1f6feb" aria-label="Blue"></button>
+          <button class="dot" data-bg="#f2c94c" style="background:#f2c94c" aria-label="Yellow"></button>
+        </div>
+        <div data-show="bgType:blur" class="stack">
+          <label>Blur strength <output></output><input type="range" data-k="bgBlur" min="2" max="60" step="1"></label>
+          <label>Darken <output></output><input type="range" data-k="bgDim" min="0.2" max="1.2" step="0.05"></label>
+        </div>
+        <div data-show="bgType:image"><label class="file">Choose a picture <input type="file" id="bgFile" accept="image/*"></label></div>
+      </section>
+
+      <section>
+        <h3>Extras</h3>
+        <label>White outline <output></output><input type="range" data-k="outline" min="0" max="12" step="1"></label>
+        <label>Shadow <output></output><input type="range" data-k="shadow" min="0" max="40" step="1"></label>
+      </section>
+
+      <section>
+        <h3>Download settings</h3>
+        <label>File type <select id="fmt" data-k="format"></select></label>
+        <label>Size <select data-k="scale"><option value="1">Original</option><option value="0.75">Large (75%)</option><option value="0.5">Medium (50%)</option><option value="0.25">Small (25%)</option></select></label>
+        <label>Quality <select data-k="bitrate"><option value="3">Small file</option><option value="8">Good</option><option value="16">Better</option><option value="30">Best</option></select></label>
+        <label>Smoothness <select data-k="fps"><option value="24">24 fps (film)</option><option value="30">30 fps (standard)</option><option value="60">60 fps (extra smooth)</option></select></label>
+        <label class="check"><input type="checkbox" data-k="audio"> Keep the sound</label>
+        <label class="check"><input type="checkbox" id="maskOnly"> Download a black &amp; white mask instead (for video editors)</label>
+      </section>
+
+      <button id="reset" class="link">Reset everything</button>
+    </div>
   </aside>
 </main>
 
-<button id="fab" class="primary" type="button">Export cutout</button>
+<button id="fab" class="primary" type="button">Download video</button>
 <video id="video" playsinline crossorigin="anonymous"></video>
 <script type="module" src="../js/app.js"></script>
 </body>

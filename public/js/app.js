@@ -8,23 +8,24 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const DEFAULTS = {
   engine: 'selfie', classes: [15], strength: 1, edgeShift: 0, softness: 0.2, feather: 1.5, temporal: 0.4, invert: false,
   keyColor: '#00ff00', keySim: 0.3, keySmooth: 0.12,
-  bgType: 'transparent', bgColor: '#101820', bgColor2: '#7c5cff', bgBlur: 20, bgDim: 0.8,
+  bgType: 'transparent', bgColor: '#ffffff', bgColor2: '#c33764', bgBlur: 20, bgDim: 0.85,
   outline: 0, outlineColor: '#ffffff', shadow: 0,
-  outMode: 'result', format: '', scale: 1, fps: 30, bitrate: 8, audio: true, checker: true,
+  outMode: 'result', format: '', scale: 1, fps: 30, bitrate: 8, audio: true,
 };
+// Quick looks shown to everyone. Each patch fully describes the look so switching never leaves leftovers.
+const BASE_LOOK = { engine: 'selfie', strength: 1, invert: false, outline: 0, shadow: 0, outMode: 'result' };
 const PRESETS = {
-  'Portrait': { engine: 'selfie', strength: 1, softness: 0.2, feather: 1.5, temporal: 0.4 },
-  'Hair detail': { engine: 'multiclass', strength: 1, softness: 0.3, feather: 1, temporal: 0.3 },
-  'Soft 60%': { strength: 0.6, feather: 3 },
-  'Blur bg': { bgType: 'blur', strength: 1 },
-  'Green screen out': { engine: 'chroma', bgType: 'transparent', keyColor: '#00ff00' },
-  'Sticker outline': { outline: 4, outlineColor: '#ffffff', shadow: 10 },
-  'Studio gradient': { bgType: 'gradient', bgColor: '#1d2671', bgColor2: '#c33764' },
+  transparent: { ...BASE_LOOK, bgType: 'transparent', alpha: true },
+  blur: { ...BASE_LOOK, bgType: 'blur', bgBlur: 20, alpha: false },
+  white: { ...BASE_LOOK, bgType: 'color', bgColor: '#ffffff', alpha: false },
+  green: { ...BASE_LOOK, bgType: 'color', bgColor: '#00b140', alpha: false },
+  sticker: { ...BASE_LOOK, bgType: 'transparent', outline: 5, outlineColor: '#ffffff', shadow: 12, alpha: true },
 };
 
+const STORE = 'cutout-state-3';
 let state = { ...DEFAULTS };
-try { state = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('cutout-state') || '{}') }; } catch {}
-const save = () => { try { localStorage.setItem('cutout-state', JSON.stringify(state)); } catch {} };
+try { state = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch {}
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {} };
 
 const video = $('#video');
 const canvas = $('#out');
@@ -37,10 +38,14 @@ let fileName = 'video';
 // ---------- UI binding ----------
 function fmtOut(el, v) {
   const k = el.dataset.k;
-  if (['strength', 'temporal', 'softness'].includes(k)) return Math.round(v * 100) + '%';
-  if (k === 'edgeShift') return (v > 0 ? '+' : '') + Math.round(v * 100);
-  if (['feather', 'bgBlur', 'outline', 'shadow'].includes(k)) return v + 'px';
+  if (['strength', 'temporal'].includes(k)) return Math.round(v * 100) + '%';
+  if (k === 'edgeShift') return v === 0 ? 'normal' : (v > 0 ? 'wider ' : 'tighter ') + Math.abs(Math.round(v * 100));
+  if (['feather', 'bgBlur', 'outline', 'shadow'].includes(k)) return v === 0 ? 'off' : v + 'px';
   return v;
+}
+function presetActive(name) {
+  const p = PRESETS[name];
+  return Object.entries(p).every(([k, v]) => k === 'alpha' || state[k] === v);
 }
 function syncUI() {
   for (const el of $$('[data-k]')) {
@@ -51,28 +56,46 @@ function syncUI() {
     const out = el.parentElement.querySelector('output');
     if (out && el.type === 'range') out.textContent = fmtOut(el, +state[k]);
   }
-  $('#deeplabBox').classList.toggle('hidden', state.engine !== 'deeplab');
-  $('#chromaBox').classList.toggle('hidden', state.engine !== 'chroma');
-  $('#canvasWrap').classList.toggle('checker', state.checker && view !== 'mask');
+  for (const b of $$('[data-set]')) b.classList.toggle('on', String(state[b.dataset.set]) === b.dataset.val);
+  for (const b of $$('[data-preset]')) b.classList.toggle('on', presetActive(b.dataset.preset));
+  for (const el of $$('[data-show]')) {
+    const [k, vals] = el.dataset.show.split(':');
+    el.classList.toggle('hidden', !vals.split('|').includes(String(state[k])));
+  }
+  $('#maskOnly').checked = state.outMode === 'mask';
+  $('#canvasWrap').classList.toggle('checker', state.bgType === 'transparent' && view !== 'mask');
   $$('#classes input').forEach((c) => (c.checked = state.classes.includes(+c.value)));
 }
 const NUM = new Set(['strength', 'edgeShift', 'softness', 'feather', 'temporal', 'keySim', 'keySmooth', 'bgBlur', 'bgDim', 'outline', 'shadow', 'scale', 'fps', 'bitrate']);
-for (const el of $$('[data-k]')) {
-  el.addEventListener('input', async () => {
-    const k = el.dataset.k;
-    state[k] = el.type === 'checkbox' ? el.checked : NUM.has(k) ? +el.value : el.value;
-    if (k === 'engine') { state.classes = state.classes.length ? state.classes : [15]; await loadEngine(); }
-    if (k === 'scale') applySize();
-    syncUI(); save(); requestRender(k === 'engine');
-  });
+async function setKey(k, v) {
+  state[k] = NUM.has(k) ? +v : v;
+  if (k === 'engine') { if (!state.classes.length) state.classes = [15]; await loadEngine(); }
+  if (k === 'scale') applySize();
+  syncUI(); save(); requestRender(k === 'engine');
 }
-function applyPatch(patch) {
-  Object.assign(state, patch); syncUI(); save();
+for (const el of $$('[data-k]')) {
+  el.addEventListener('input', () => setKey(el.dataset.k, el.type === 'checkbox' ? el.checked : el.value));
+}
+$('#maskOnly').onchange = (e) => setKey('outMode', e.target.checked ? 'mask' : 'result');
+$('#advToggle').onclick = () => {
+  const open = $('#adv').classList.toggle('hidden') === false;
+  $('#advToggle').setAttribute('aria-expanded', open);
+  $('#advToggle span').textContent = open ? '▴' : '▾';
+};
+for (const b of $$('[data-set]')) b.addEventListener('click', () => setKey(b.dataset.set, b.dataset.val));
+
+// Best default container: alpha needs WebM, otherwise prefer MP4 when the browser can record it.
+function pickFormat(alpha) {
+  const f = alpha ? FORMATS.find(([m]) => m.includes('webm')) : FORMATS.find(([m]) => m.includes('mp4'));
+  return (f || FORMATS[0])?.[0] || '';
+}
+function applyPreset(name) {
+  const { alpha, ...patch } = PRESETS[name];
+  Object.assign(state, patch, { format: pickFormat(alpha) });
+  syncUI(); save();
   loadEngine().then(() => requestRender(true));
 }
-$('#presets').append(...Object.entries(PRESETS).map(([name, patch]) => {
-  const b = document.createElement('button'); b.textContent = name; b.onclick = () => applyPatch(patch); return b;
-}));
+for (const b of $$('[data-preset]')) b.addEventListener('click', () => applyPreset(b.dataset.preset));
 $('#classes').append(...DEEPLAB_CLASSES.slice(1).map((name, i) => {
   const l = document.createElement('label');
   l.innerHTML = `<input type="checkbox" value="${i + 1}">${name}`;
@@ -81,8 +104,8 @@ $('#classes').append(...DEEPLAB_CLASSES.slice(1).map((name, i) => {
   };
   return l;
 }));
-$$('[data-bg]').forEach((b) => (b.onclick = () => { state.bgType = 'color'; state.bgColor = b.dataset.bg; syncUI(); save(); requestRender(); }));
-$('#reset').onclick = () => { state = { ...DEFAULTS }; syncUI(); save(); loadEngine().then(() => requestRender(true)); };
+$$('[data-bg]').forEach((b) => (b.onclick = () => setKey('bgColor', b.dataset.bg)));
+$('#reset').onclick = () => { state = { ...DEFAULTS }; state.format = pickFormat(true); syncUI(); save(); loadEngine().then(() => requestRender(true)); };
 $('#bgFile').onchange = (e) => {
   const f = e.target.files[0]; if (!f) return;
   const img = new Image();
@@ -118,7 +141,7 @@ fileInput.onchange = () => fileInput.files[0] && openFile(fileInput.files[0]);
 ['dragleave', 'drop'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 document.addEventListener('drop', (e) => e.dataTransfer.files[0] && openFile(e.dataTransfer.files[0]));
 document.addEventListener('paste', (e) => { const f = e.clipboardData?.files?.[0]; if (f) openFile(f); });
-$('#newFile').onclick = () => { $('#fab').hidden = true; video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
+$('#newFile').onclick = () => { $('#fab').hidden = true; $('#panel').classList.add('hidden'); $('.layout').classList.add('empty'); video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
 
 function waitVideo(url) {
   return new Promise((resolve, reject) => {
@@ -135,6 +158,8 @@ async function openFile(file) {
   fileName = file.name.replace(/\.[^.]+$/, '');
   drop.classList.add('hidden');
   $('#fab').hidden = false;
+  $('#panel').classList.remove('hidden');
+  $('.layout').classList.remove('empty');
   $('#player').classList.remove('hidden');
   $('#exportCard').classList.add('hidden');
   busy(true, 'Opening video…');
@@ -244,11 +269,11 @@ async function getAudioStream() {
 }
 
 let cancelExport = null;
-$('#fab').onclick = () => $('#exportBtn').click();
-$('#exportBtn').onclick = async () => {
+$('#fab').onclick = () => $('#download').click();
+$('#download').onclick = async () => {
   if (exporting) { cancelExport?.(); return; }
   if (!video.videoWidth) return;
-  const btn = $('#exportBtn');
+  const btn = $('#download');
   await engineReady;
   const [mime, , ext] = FORMATS.find(([m]) => m === state.format) || FORMATS[0];
   video.pause();
@@ -256,7 +281,7 @@ $('#exportBtn').onclick = async () => {
   await new Promise((r) => video.addEventListener('seeked', r, { once: true }));
   exporting = true;
   pipe.reset();
-  btn.textContent = $('#fab').textContent = 'Cancel export';
+  btn.textContent = $('#fab').textContent = 'Stop';
   const stream = canvas.captureStream(state.fps);
   if (state.audio) { try { (await getAudioStream()).getAudioTracks().forEach((t) => stream.addTrack(t)); } catch (e) { console.warn(e); } }
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: state.bitrate * 1e6 });
@@ -267,7 +292,7 @@ $('#exportBtn').onclick = async () => {
   let finished = false;
   const finish = () => {
     if (finished) return; finished = true;
-    exporting = false; cancelExport = null; btn.textContent = 'Remove background & export'; $('#fab').textContent = 'Export cutout';
+    exporting = false; cancelExport = null; btn.textContent = 'Download video'; $('#fab').textContent = 'Download video';
     busy(false);
     rec.state !== 'inactive' && rec.stop();
   };
@@ -293,8 +318,9 @@ function showResult(blob, ext) {
   const card = $('#exportCard');
   const name = `${fileName}-cutout.${ext}`;
   card.classList.remove('hidden');
-  card.innerHTML = `<b>Done</b> <span class="muted">${(blob.size / 1e6).toFixed(1)} MB</span><br><br><video controls loop src="${url}"></video>
-    <div class="row"><a href="${url}" download="${name}"><button class="primary" style="width:auto;padding:9px 18px">Download ${name}</button></a></div>`;
+  card.innerHTML = `<b>Your video is ready</b> <span class="muted">${(blob.size / 1e6).toFixed(1)} MB</span>
+    <video controls loop src="${url}"></video>
+    <a class="dl" href="${url}" download="${name}">Download ${ext.toUpperCase()}</a>`;
   card.scrollIntoView({ behavior: 'smooth' });
   video.onended = null;
   video.currentTime = 0;
@@ -306,4 +332,6 @@ function download(blob, name) {
 }
 
 $('#fab').hidden = true;
+$('#panel').classList.add('hidden');
+$('.layout').classList.add('empty');
 syncUI();
