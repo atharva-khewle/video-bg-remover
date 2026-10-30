@@ -10,7 +10,7 @@ const DEFAULTS = {
   keyColor: '#00ff00', keySim: 0.3, keySmooth: 0.12,
   bgType: 'transparent', bgColor: '#ffffff', bgColor2: '#c33764', bgBlur: 20, bgDim: 0.85,
   outline: 0, outlineColor: '#ffffff', shadow: 0,
-  outMode: 'result', format: '', scale: 1, fps: 30, bitrate: 8, audio: true,
+  outMode: 'result', container: 'mp4', scale: 1, fps: 30, bitrate: 8, audio: true,
 };
 // Quick looks shown to everyone. Each patch fully describes the look so switching never leaves leftovers.
 const BASE_LOOK = { engine: 'selfie', strength: 1, invert: false, outline: 0, shadow: 0, outMode: 'result' };
@@ -84,14 +84,9 @@ $('#advToggle').onclick = () => {
 };
 for (const b of $$('[data-set]')) b.addEventListener('click', () => setKey(b.dataset.set, b.dataset.val));
 
-// Best default container: alpha needs WebM, otherwise prefer MP4 when the browser can record it.
-function pickFormat(alpha) {
-  const f = alpha ? FORMATS.find(([m]) => m.includes('webm')) : FORMATS.find(([m]) => m.includes('mp4'));
-  return (f || FORMATS[0])?.[0] || '';
-}
 function applyPreset(name) {
   const { alpha, ...patch } = PRESETS[name];
-  Object.assign(state, patch, { format: pickFormat(alpha) });
+  Object.assign(state, patch);
   syncUI(); save();
   loadEngine().then(() => requestRender(true));
 }
@@ -105,7 +100,7 @@ $('#classes').append(...DEEPLAB_CLASSES.slice(1).map((name, i) => {
   return l;
 }));
 $$('[data-bg]').forEach((b) => (b.onclick = () => setKey('bgColor', b.dataset.bg)));
-$('#reset').onclick = () => { state = { ...DEFAULTS }; state.format = pickFormat(true); syncUI(); save(); loadEngine().then(() => requestRender(true)); };
+$('#reset').onclick = () => { state = { ...DEFAULTS }; syncUI(); save(); loadEngine().then(() => requestRender(true)); };
 $('#bgFile').onchange = (e) => {
   const f = e.target.files[0]; if (!f) return;
   const img = new Image();
@@ -189,9 +184,10 @@ function applySize() {
 
 // ---------- rendering ----------
 let rafQueued = false;
+let exportState = null; // settings used while exporting (may differ from the UI, e.g. MP4 background fill)
 function renderNow(force = false) {
   if (!video.videoWidth || !pipe.W) return;
-  try { pipe.render(video, state, exporting ? (state.outMode === 'mask' ? 'mask' : 'result') : view, force); }
+  try { pipe.render(video, exporting && exportState ? exportState : state, exporting ? (state.outMode === 'mask' ? 'mask' : 'result') : view, force); }
   catch (e) { console.error(e); }
 }
 function requestRender(force = false) {
@@ -271,9 +267,6 @@ const FORMATS = [
   ['video/mp4;codecs=avc1,mp4a.40.2', 'MP4 H.264 (no transparency)', 'mp4'],
   ['video/webm', 'WebM (default codec)', 'webm'],
 ].filter(([m]) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
-const fmtSel = $('#fmt');
-fmtSel.innerHTML = FORMATS.map(([m, l]) => `<option value="${m}">${l}</option>`).join('');
-if (!FORMATS.some(([m]) => m === state.format)) state.format = FORMATS[0]?.[0] || '';
 
 let audioGraph;
 // A suspended AudioContext would stall the element once it is routed through it, so bail out unless it runs.
@@ -306,12 +299,39 @@ function releaseAudio() {
 
 let cancelExport = null;
 $('#fab').onclick = () => $('#download').click();
-$('#download').onclick = async () => {
+const dlg = $('#dlg');
+const containerMime = (c) => (c === 'mp4'
+  ? FORMATS.find(([m]) => m.includes('mp4'))?.[0]
+  : (FORMATS.find(([m]) => m.includes('vp9')) || FORMATS.find(([m]) => m.includes('webm')))?.[0]);
+function syncDialog() {
+  const c = $('input[name=cont]:checked', dlg).value;
+  $('#fillRow').classList.toggle('hidden', !(c === 'mp4' && state.bgType === 'transparent' && state.outMode !== 'mask'));
+}
+$('#download').onclick = () => {
   if (exporting) { cancelExport?.(); return; }
   if (!video.videoWidth) return;
+  $(`input[name=cont][value=${state.container}]`, dlg).checked = true;
+  syncDialog();
+  dlg.showModal();
+};
+$$('input[name=cont]', dlg).forEach((r) => (r.onchange = syncDialog));
+$('#dlgCancel').onclick = () => dlg.close();
+$('#dlgGo').onclick = () => {
+  const container = $('input[name=cont]:checked', dlg).value;
+  const fill = $('input[name=fill]:checked', dlg).value;
+  dlg.close();
+  setKey('container', container);
+  runExport(container, fill);
+};
+async function runExport(container, fill) {
   const btn = $('#download');
   await engineReady;
-  const [mime, , ext] = FORMATS.find(([m]) => m === state.format) || FORMATS[0];
+  const nativeMp4 = containerMime('mp4');
+  const needTranscode = container === 'mp4' && !nativeMp4; // e.g. Firefox: record WebM, convert to MP4 after
+  const mime = (container === 'mp4' && nativeMp4) || containerMime('webm');
+  const ext = container === 'mp4' ? 'mp4' : 'webm';
+  exportState = { ...state };
+  if (container === 'mp4' && state.bgType === 'transparent') { exportState.bgType = 'color'; exportState.bgColor = fill; }
   video.pause();
   video.currentTime = 0;
   await new Promise((r) => video.addEventListener('seeked', r, { once: true }));
@@ -336,7 +356,10 @@ $('#download').onclick = async () => {
   rec.onstop = () => {
     if (cancelled) return;
     const blob = new Blob(chunks, { type: mime.split(';')[0] });
-    showResult(blob, ext);
+    if (!needTranscode) return showResult(blob, ext);
+    transcode(new File([blob], 'cutout.webm', { type: blob.type }), (t) => busy(true, t, 0), (p) => busy(true, 'Converting to MP4…', p))
+      .then((f) => { busy(false); showResult(f, 'mp4'); })
+      .catch(() => { busy(false); showResult(blob, 'webm'); });
   };
   let guard = setInterval(() => {
     busy(true, `Processing ${mmss(video.currentTime)} / ${mmss(video.duration)} — keep this tab open`, video.currentTime / video.duration);

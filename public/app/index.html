@@ -129,7 +129,7 @@
 
       <section>
         <h3>Download settings</h3>
-        <label>File type <select id="fmt" data-k="format"></select></label>
+        <label>File type <select id="fmt" data-k="container"><option value="mp4">MP4 (plays everywhere)</option><option value="webm">WebM (keeps transparency)</option></select></label>
         <label>Size <select data-k="scale"><option value="1">Original</option><option value="0.75">Large (75%)</option><option value="0.5">Medium (50%)</option><option value="0.25">Small (25%)</option></select></label>
         <label>Quality <select data-k="bitrate"><option value="3">Small file</option><option value="8">Good</option><option value="16">Better</option><option value="30">Best</option></select></label>
         <label>Smoothness <select data-k="fps"><option value="24">24 fps (film)</option><option value="30">30 fps (standard)</option><option value="60">60 fps (extra smooth)</option></select></label>
@@ -140,6 +140,21 @@
     </div>
   </aside>
 </main>
+
+<dialog id="dlg">
+  <h3>Download as</h3>
+  <label class="opt"><input type="radio" name="cont" value="mp4" checked><span><b>MP4</b><small>Plays everywhere: phones, social apps, editors</small></span></label>
+  <label class="opt"><input type="radio" name="cont" value="webm"><span><b>WebM</b><small>Keeps a transparent background (for editing and the web)</small></span></label>
+  <div id="fillRow" class="hidden">
+    <p class="hint">MP4 can't be see-through. Fill the empty background with:</p>
+    <div class="fills">
+      <label><input type="radio" name="fill" value="#ffffff" checked><i style="background:#fff"></i>White</label>
+      <label><input type="radio" name="fill" value="#000000"><i style="background:#000"></i>Black</label>
+      <label><input type="radio" name="fill" value="#00b140"><i style="background:#00b140"></i>Green</label>
+    </div>
+  </div>
+  <div class="dlg-actions"><button id="dlgCancel" class="ghost" type="button">Cancel</button><button id="dlgGo" class="go" type="button">Download</button></div>
+</dialog>
 
 <button id="fab" class="primary" type="button">Download video</button>
 <video id="video" playsinline crossorigin="anonymous"></video>
