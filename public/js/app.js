@@ -82,6 +82,8 @@ $('#advToggle').onclick = () => {
   const open = $('#adv').classList.toggle('hidden') === false;
   $('#advToggle').setAttribute('aria-expanded', open);
   $('#advToggle span').textContent = open ? '▴' : '▾';
+  if (open) startDetector();
+  requestRender(true);
 };
 for (const b of $$('[data-set]')) b.addEventListener('click', () => setKey(b.dataset.set, b.dataset.val));
 
@@ -137,7 +139,7 @@ fileInput.onchange = () => fileInput.files[0] && openFile(fileInput.files[0]);
 ['dragleave', 'drop'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 document.addEventListener('drop', (e) => e.dataTransfer.files[0] && openFile(e.dataTransfer.files[0]));
 document.addEventListener('paste', (e) => { const f = e.clipboardData?.files?.[0]; if (f) openFile(f); });
-$('#newFile').onclick = () => { tracker.reset(); whoSig = ''; $('#who').classList.add('hidden'); $('#fab').hidden = true; $('#panel').classList.add('hidden'); $('.layout').classList.add('empty'); video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
+$('#newFile').onclick = () => { tracker.reset(); whoSig = ''; $('#fab').hidden = true; $('#panel').classList.add('hidden'); $('.layout').classList.add('empty'); video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
 
 function waitVideo(url) {
   return new Promise((resolve, reject) => {
@@ -153,7 +155,7 @@ function waitVideo(url) {
 async function openFile(file) {
   fileName = file.name.replace(/\.[^.]+$/, '');
   drop.classList.add('hidden');
-  tracker.reset(); whoSig = ''; $('#who').classList.add('hidden');
+  tracker.reset(); whoSig = '';
   $('#fab').hidden = false;
   $('#panel').classList.remove('hidden');
   $('.layout').classList.remove('empty');
@@ -176,7 +178,6 @@ async function openFile(file) {
   await loadEngine();
   video.currentTime = 0;
   requestRender(true);
-  ensureDetector().then(() => { detectorReady = true; requestRender(true); }).catch((e) => console.warn('detector unavailable', e));
 }
 
 function applySize() {
@@ -219,6 +220,15 @@ async function applySelection() {
   await ensureEngine(wantedEngine(state));
   pipe.reset(); refreshWho(); requestRender(true);
 }
+const advOpen = () => !$('#adv').classList.contains('hidden');
+let detectorLoading = false;
+function startDetector() { // the 12 MB model is only fetched once the user opens advanced settings
+  if (detectorReady || detectorLoading) return;
+  detectorLoading = true;
+  $('#whoHint').textContent = 'Looking for people and objects…';
+  ensureDetector().then(() => { detectorReady = true; requestRender(true); })
+    .catch((e) => { detectorLoading = false; console.warn('detector unavailable', e); $('#whoHint').textContent = 'Object detection is not available in this browser.'; });
+}
 function detectStep(force) {
   if (!detectorReady) return;
   const now = performance.now();
@@ -236,7 +246,6 @@ function refreshWho() {
   const sig = JSON.stringify(list.map((x) => [x.id, x.keep, Math.abs(t - x.seen) < 0.4]));
   if (sig === whoSig) return;
   whoSig = sig;
-  $('#who').classList.toggle('hidden', !list.length);
   $('#whoChips').replaceChildren(...list.map((x) => {
     const b = document.createElement('button');
     b.className = 'who-chip ' + (x.keep ? 'is-keep' : 'is-removed') + (Math.abs(t - x.seen) < 0.4 ? '' : ' away');
@@ -250,7 +259,7 @@ function refreshWho() {
   const parts = [];
   if (people) parts.push(people + (people === 1 ? ' person' : ' people'));
   if (others) parts.push(others + (others === 1 ? ' other object' : ' other objects'));
-  $('#whoHint').textContent = `Found ${parts.join(' and ')}. Tap one to keep or remove it.`;
+  $('#whoHint').textContent = parts.length ? `Found ${parts.join(' and ')}. Tap one to keep or remove it.` : 'Nobody in this frame. Move the video to a frame where they are visible.';
 }
 function toggleTrack(x) { x.keep = !x.keep; x.decided = true; whoSig = ''; applySelection(); }
 $('#midBtn').onclick = () => {
@@ -268,7 +277,7 @@ function drawOverlay() {
   if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
   const c = ov.getContext('2d');
   c.clearRect(0, 0, W, H);
-  if (!showBoxes || exporting || view === 'mask') return;
+  if (!showBoxes || !advOpen() || exporting || view === 'mask') return;
   const lw = Math.max(2, W / 320);
   c.font = `600 ${Math.round(lw * 5.5)}px system-ui, sans-serif`;
   c.textBaseline = 'top';
@@ -286,7 +295,7 @@ function drawOverlay() {
   }
 }
 canvas.addEventListener('click', (e) => {
-  if (picking || !showBoxes || exporting) return;
+  if (picking || !showBoxes || !advOpen() || exporting) return;
   const r = canvas.getBoundingClientRect();
   const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
   const hit = tracker.visible(video.currentTime)
@@ -299,7 +308,7 @@ let exportState = null; // settings used while exporting (may differ from the UI
 function renderNow(force = false) {
   if (!video.videoWidth || !pipe.W) return;
   try {
-    if (showBoxes || usesRegion()) detectStep(force);
+    if (advOpen() || usesRegion()) detectStep(force);
     pipe.render(video, effState(exporting && exportState ? exportState : state), exporting ? (state.outMode === 'mask' ? 'mask' : 'result') : view, force);
     drawOverlay();
   } catch (e) { console.error(e); }

@@ -48,14 +48,6 @@
   </section>
 
   <aside class="panel" id="panel">
-    <section id="who" class="who hidden">
-      <h2>Who to keep</h2>
-      <p class="hint" id="whoHint">Tap to keep or remove.</p>
-      <div class="who-chips" id="whoChips"></div>
-      <div class="row"><button id="midBtn" class="ghost sm" type="button">Keep only the middle person</button><button id="allBtn" class="ghost sm" type="button">Keep everyone</button></div>
-      <label class="check"><input type="checkbox" id="showBoxes" checked> Show outlines on the video</label>
-    </section>
-
     <h2>Choose a look</h2>
     <div class="looks">
       <button data-preset="transparent" class="look"><i class="sw sw-checker"></i><b>Transparent</b><small>Just the person</small></button>
@@ -72,6 +64,14 @@
 
     <div id="adv" class="adv hidden">
       <button id="reset" class="ghost reset" type="button">↺ Reset all settings to default</button>
+      <section id="who" class="who">
+        <h3>Who to keep</h3>
+        <p class="hint" id="whoHint">Pause on a frame where people or objects are visible and they show up here.</p>
+        <div class="who-chips" id="whoChips"></div>
+        <div class="row"><button id="midBtn" class="ghost sm" type="button">Keep only the middle person</button><button id="allBtn" class="ghost sm" type="button">Keep everyone</button></div>
+        <label class="check"><input type="checkbox" id="showBoxes" checked> Show outlines on the video</label>
+      </section>
+
       <section>
         <h3>What to cut out</h3>
         <div class="chips2">
