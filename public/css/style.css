@@ -62,3 +62,31 @@ input[type=color]{width:34px;height:26px;border:1px solid var(--line);background
 .card video{max-width:100%;max-height:50vh;border-radius:8px;background:conic-gradient(#2b2f3b 25%,#3a3f4e 0 50%,#2b2f3b 0 75%,#3a3f4e 0) 0 0/24px 24px}
 .card .row{margin-top:10px}
 #video{position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+/* ---------- responsive ---------- */
+.brand{color:inherit}
+#fab{display:none}
+@media(max-width:900px){
+  .top{padding:10px 14px}
+  .badge{display:none}
+  .brand small{display:none}
+  .layout{padding:10px 10px calc(76px + env(safe-area-inset-bottom))}
+  .drop{min-height:260px;padding:20px}
+  .drop .big{font-size:18px}
+  #out{max-height:46vh}
+  .player{padding:8px}
+  .transport{flex-wrap:wrap}
+  .transport input[type=range]{order:5;flex-basis:100%}
+  .transport #time{margin-left:auto}
+  .views{overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px}
+  .views button,.views label{white-space:nowrap}
+  button,.panel select{min-height:44px}
+  button.sm{min-height:36px}
+  .panel{padding:2px 12px}
+  .panel input[type=range]{height:32px}
+  input[type=color]{width:44px;height:36px}
+  .chips button,.chips label{padding:8px 12px;font-size:13px}
+  .bar{width:70vw}
+  #fab{display:block;position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:20;box-shadow:0 6px 24px #000a;margin:0}
+  #fab[hidden]{display:none}
+}

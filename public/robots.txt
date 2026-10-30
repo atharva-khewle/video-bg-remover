@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://video-bg-remover.ak-projects-101.workers.dev/sitemap.xml

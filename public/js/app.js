@@ -118,7 +118,7 @@ fileInput.onchange = () => fileInput.files[0] && openFile(fileInput.files[0]);
 ['dragleave', 'drop'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 document.addEventListener('drop', (e) => e.dataTransfer.files[0] && openFile(e.dataTransfer.files[0]));
 document.addEventListener('paste', (e) => { const f = e.clipboardData?.files?.[0]; if (f) openFile(f); });
-$('#newFile').onclick = () => { video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
+$('#newFile').onclick = () => { $('#fab').hidden = true; video.pause(); $('#player').classList.add('hidden'); $('#exportCard').classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; };
 
 function waitVideo(url) {
   return new Promise((resolve, reject) => {
@@ -134,6 +134,7 @@ function waitVideo(url) {
 async function openFile(file) {
   fileName = file.name.replace(/\.[^.]+$/, '');
   drop.classList.add('hidden');
+  $('#fab').hidden = false;
   $('#player').classList.remove('hidden');
   $('#exportCard').classList.add('hidden');
   busy(true, 'Opening video…');
@@ -243,6 +244,7 @@ async function getAudioStream() {
 }
 
 let cancelExport = null;
+$('#fab').onclick = () => $('#exportBtn').click();
 $('#exportBtn').onclick = async () => {
   if (exporting) { cancelExport?.(); return; }
   if (!video.videoWidth) return;
@@ -254,7 +256,7 @@ $('#exportBtn').onclick = async () => {
   await new Promise((r) => video.addEventListener('seeked', r, { once: true }));
   exporting = true;
   pipe.reset();
-  btn.textContent = 'Cancel export';
+  btn.textContent = $('#fab').textContent = 'Cancel export';
   const stream = canvas.captureStream(state.fps);
   if (state.audio) { try { (await getAudioStream()).getAudioTracks().forEach((t) => stream.addTrack(t)); } catch (e) { console.warn(e); } }
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: state.bitrate * 1e6 });
@@ -265,7 +267,7 @@ $('#exportBtn').onclick = async () => {
   let finished = false;
   const finish = () => {
     if (finished) return; finished = true;
-    exporting = false; cancelExport = null; btn.textContent = 'Remove background & export';
+    exporting = false; cancelExport = null; btn.textContent = 'Remove background & export'; $('#fab').textContent = 'Export cutout';
     busy(false);
     rec.state !== 'inactive' && rec.stop();
   };
@@ -303,4 +305,5 @@ function download(blob, name) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
 }
 
+$('#fab').hidden = true;
 syncUI();
